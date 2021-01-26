@@ -124,7 +124,6 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
       lastUpdateTime = now;
       // Compute total surplus
       uint256 totalSurplus;
-      // While we still haven't gone through the entire list
       for (uint i = 0; i < surplusHolders.length; i++) {
         totalSurplus = addition(totalSurplus, safeEngine.coinBalance(surplusHolders[i]));
       }
@@ -135,9 +134,9 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
       // Pay the caller for updating the rate
       rewardCaller(feeReceiver, callerReward);
   }
-  function backupRecomputeOnAuctionSystemCoinLimit(address feeReceiver) public {
+  function backupRecomputeOnAuctionSystemCoinLimit() public {
       // Check delay between calls
-      require(either(subtract(now, lastUpdateTime) >= backupUpdateDelay, lastUpdateTime > 0), "CollateralAuctionThrottler/wait-more");
+      require(both(subtract(now, lastUpdateTime) >= backupUpdateDelay, lastUpdateTime > 0), "CollateralAuctionThrottler/wait-more");
       // Store the timestamp of the update
       lastUpdateTime = now;
       // Set the onAuctionSystemCoinLimit
