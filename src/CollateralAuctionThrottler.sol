@@ -131,7 +131,7 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
       // Remove surplus from global debt
       uint256 rawGlobalDebt = subtract(safeEngine.globalDebt(), totalSurplus);
       // Calculate and set the onAuctionSystemCoinLimit
-      liquidationEngine.modifyParameters("onAuctionSystemCoinLimit", multiply(rawGlobalDebt, globalDebtPercentage) / HUNDRED);
+      liquidationEngine.modifyParameters("onAuctionSystemCoinLimit", multiply(rawGlobalDebt / HUNDRED, globalDebtPercentage));
       // Pay the caller for updating the rate
       rewardCaller(feeReceiver, callerReward);
   }
