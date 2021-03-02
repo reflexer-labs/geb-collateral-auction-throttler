@@ -78,7 +78,10 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
     * @param data The new parameter value
     */
     function modifyParameters(bytes32 parameter, uint256 data) external isAuthorized {
-        if (parameter == "baseUpdateCallerReward") baseUpdateCallerReward = data;
+        if (parameter == "baseUpdateCallerReward") {
+          require(data <= maxUpdateCallerReward, "CollateralAuctionThrottler/invalid-min-reward");
+          baseUpdateCallerReward = data;
+        }
         else if (parameter == "maxUpdateCallerReward") {
           require(data >= baseUpdateCallerReward, "CollateralAuctionThrottler/invalid-max-reward");
           maxUpdateCallerReward = data;
