@@ -1,6 +1,7 @@
 pragma solidity 0.6.7;
 
-import "../../../lib/geb-treasury-reimbursement/src/IncreasingTreasuryReimbursement.sol";
+import "./IncreasingTreasuryReimbursementMock.sol";
+// import "../../../lib/geb-treasury-reimbursement/src/IncreasingTreasuryReimbursement.sol";
 
 abstract contract LiquidationEngineLike {
     function modifyParameters(bytes32, uint256) virtual external;
@@ -10,7 +11,7 @@ abstract contract SAFEEngineLike {
     function coinBalance(address) virtual public view returns (uint256);
 }
 
-contract CollateralAuctionThrottlerMock is IncreasingTreasuryReimbursement {
+contract CollateralAuctionThrottlerMock is IncreasingTreasuryReimbursementMock {
     // --- Variables ---
     // Delay between updates after which the reward starts to increase
     uint256 public updateDelay;                     // [seconds]
@@ -42,7 +43,7 @@ contract CollateralAuctionThrottlerMock is IncreasingTreasuryReimbursement {
       uint256 perSecondCallerRewardIncrease_,
       uint256 globalDebtPercentage_,
       address[] memory surplusHolders_
-    ) public IncreasingTreasuryReimbursement(treasury_, baseUpdateCallerReward_, maxUpdateCallerReward_, perSecondCallerRewardIncrease_) {
+    ) public IncreasingTreasuryReimbursementMock(treasury_, baseUpdateCallerReward_, maxUpdateCallerReward_, perSecondCallerRewardIncrease_) {
         require(safeEngine_ != address(0), "CollateralAuctionThrottler/null-safe-engine");
         require(liquidationEngine_ != address(0), "CollateralAuctionThrottler/null-liquidation-engine");
         require(updateDelay_ > 0, "CollateralAuctionThrottler/null-update-delay");
