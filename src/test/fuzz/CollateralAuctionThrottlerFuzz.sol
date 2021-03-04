@@ -95,8 +95,10 @@ contract Fuzz {
     }
 
     function fuzzRecompute() public {
+        uint previousBalance = systemCoin.balanceOf(address(0xfab));
         throttler.recomputeOnAuctionSystemCoinLimit(address(0xfab));
-        assert(systemCoin.balanceOf(address(0xfab)) >= throttler.baseUpdateCallerReward());
+        assert(systemCoin.balanceOf(address(0xfab)) - previousBalance >= throttler.baseUpdateCallerReward());
+        assert(systemCoin.balanceOf(address(0xfab)) - previousBalance <= throttler.maxUpdateCallerReward());
         assert(throttler.lastUpdateTime() == now);
         assert(liquidationEngine.onAuctionSystemCoinLimit() == (safeEngine.globalDebt() - safeEngine.coinBalance(surplusHolder)) * throttler.globalDebtPercentage() / 100); // overflows for values close to max_uint, should not be an issue (10**30 * RAD debt)
     }
