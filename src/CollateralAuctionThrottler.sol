@@ -1,12 +1,13 @@
 pragma solidity 0.6.7;
 
-import "geb-treasury-reimbursement/IncreasingTreasuryReimbursement.sol";
+import "geb-treasury-reimbursement/reimbursement/IncreasingTreasuryReimbursement.sol";
 
 abstract contract LiquidationEngineLike {
     function modifyParameters(bytes32, uint256) virtual external;
 }
 abstract contract SAFEEngineLike {
     function globalDebt() virtual public view returns (uint256);
+    function globalUnbackedDebt() virtual public view returns (uint256);
     function coinBalance(address) virtual public view returns (uint256);
 }
 
@@ -18,6 +19,8 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
     uint256 public backupUpdateDelay;               // [seconds]
     // Percentage of global debt taken into account in order to set LiquidationEngine.onAuctionSystemCoinLimit
     uint256 public globalDebtPercentage;            // [hundred]
+    // The minimum auction limit
+    uint256 public minAuctionLimit;                 // [rad]
     // Last timestamp when the median was updated
     uint256 public lastUpdateTime;                  // [unix timestamp]
 
@@ -54,6 +57,7 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
         surplusHolders         = surplusHolders_;
 
         emit ModifyParameters(bytes32("updateDelay"), updateDelay);
+        emit ModifyParameters(bytes32("globalDebtPercentage"), globalDebtPercentage);
         emit ModifyParameters(bytes32("backupUpdateDelay"), backupUpdateDelay);
     }
 
@@ -102,6 +106,9 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
           require(both(data > 0, data <= HUNDRED), "CollateralAuctionThrottler/invalid-global-debt-percentage");
           globalDebtPercentage = data;
         }
+        else if (parameter == "minAuctionLimit") {
+          minAuctionLimit = data;
+        }
         else revert("CollateralAuctionThrottler/modify-unrecognized-param");
         emit ModifyParameters(parameter, data);
     }
@@ -141,9 +148,13 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
           totalSurplus = addition(totalSurplus, safeEngine.coinBalance(surplusHolders[i]));
         }
         // Remove surplus from global debt
-        uint256 rawGlobalDebt = subtract(safeEngine.globalDebt(), totalSurplus);
+        uint256 rawGlobalDebt   = subtract(safeEngine.globalDebt(), totalSurplus);
+        rawGlobalDebt           = subtract(rawGlobalDebt, safeEngine.globalUnbackedDebt());
         // Calculate and set the onAuctionSystemCoinLimit
-        liquidationEngine.modifyParameters("onAuctionSystemCoinLimit", multiply(rawGlobalDebt / HUNDRED, globalDebtPercentage));
+        uint256 newAuctionLimit = multiply(rawGlobalDebt / HUNDRED, globalDebtPercentage);
+        newAuctionLimit         = (newAuctionLimit <= minAuctionLimit) ? minAuctionLimit : newAuctionLimit;
+        newAuctionLimit         = (newAuctionLimit == 0) ? uint(-1) : newAuctionLimit;
+        liquidationEngine.modifyParameters("onAuctionSystemCoinLimit", newAuctionLimit);
         // Pay the caller for updating the rate
         rewardCaller(feeReceiver, callerReward);
     }

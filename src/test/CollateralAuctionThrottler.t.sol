@@ -17,6 +17,9 @@ contract CustomSAFEEngine is SAFEEngine {
     function modifyGlobalDebt(bytes32 parameter, uint data) external {
         globalDebt = data;
     }
+    function modifyUnbackedDebt(bytes32 parameter, uint data) external {
+        globalUnbackedDebt = data;
+    }
 }
 
 contract CollateralAuctionThrottlerTest is DSTest {
@@ -118,10 +121,17 @@ contract CollateralAuctionThrottlerTest is DSTest {
         assertEq(throttler.maxUpdateCallerReward(), 2);
         assertEq(throttler.perSecondCallerRewardIncrease(), 10 ** 27 + 1);
     }
-    function test_auto_recompute_zero_global_debt() public {
+    function test_auto_recompute_zero_global_debt_zero_min() public {
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
         assertEq(systemCoin.balanceOf(charlie), baseUpdateCallerReward);
-        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), 0);
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), uint(-1));
+        assertEq(systemCoin.balanceOf(charlie), baseUpdateCallerReward);
+    }
+    function test_auto_recompute_zero_global_debt_positive_min() public {
+        throttler.modifyParameters("minAuctionLimit", 5E75);
+        throttler.recomputeOnAuctionSystemCoinLimit(charlie);
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), 5E75);
+        assertEq(systemCoin.balanceOf(charlie), baseUpdateCallerReward);
     }
     function test_auto_recompute_twice_positive_global_debt() public {
         safeEngine.modifyGlobalDebt("globalDebt", 1E45);
@@ -147,11 +157,19 @@ contract CollateralAuctionThrottlerTest is DSTest {
         hevm.warp(now + updateDelay - 1);
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
     }
-    function test_auto_recompute_both_addresses_have_surplus() public {
+    function test_auto_recompute_both_addresses_have_surplus_positive_unbacked_debt() public {
         safeEngine.createUnbackedDebt(address(this), address(alice), 1e45);
         safeEngine.createUnbackedDebt(address(this), address(bob), 1e45);
 
         safeEngine.modifyGlobalDebt("globalDebt", 5E45);
+        throttler.recomputeOnAuctionSystemCoinLimit(charlie);
+        assertEq(systemCoin.balanceOf(charlie), baseUpdateCallerReward);
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), 0.2E45);
+    }
+    function test_auto_recompute_non_null_unbacked_debt() public {
+        safeEngine.modifyGlobalDebt("globalDebt", 5E45);
+        safeEngine.modifyUnbackedDebt("globalUnbackedDebt", 2E45);
+
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
         assertEq(systemCoin.balanceOf(charlie), baseUpdateCallerReward);
         assertEq(liquidationEngine.onAuctionSystemCoinLimit(), 0.6E45);
