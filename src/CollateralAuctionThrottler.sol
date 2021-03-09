@@ -27,10 +27,6 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
     // List of surplus holders
     address[]                public surplusHolders;
 
-    // --- Events ---
-    event ModifyParameters(bytes32 parameter, address addr);
-    event ModifyParameters(bytes32 parameter, uint256 data);
-
     constructor(
       address safeEngine_,
       address liquidationEngine_,
