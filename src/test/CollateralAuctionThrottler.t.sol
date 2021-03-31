@@ -23,6 +23,8 @@ contract CustomSAFEEngine is SAFEEngine {
 }
 
 contract CustomLiquidationEngine is LiquidationEngine {
+    constructor(address safeEngine) public LiquidationEngine(safeEngine) {}
+
     function modifyCurrentOnAuctionSystemCoins(uint256 data) public {
         currentOnAuctionSystemCoins = data;
     }
@@ -62,7 +64,7 @@ contract CollateralAuctionThrottlerTest is DSTest {
 
         systemCoin        = new DSToken("RAI", "RAI");
         safeEngine        = new CustomSAFEEngine();
-        liquidationEngine = new LiquidationEngine(address(safeEngine));
+        liquidationEngine = new CustomLiquidationEngine(address(safeEngine));
         treasury          = new MockTreasury(address(systemCoin));
 
         systemCoin.mint(address(treasury), 1000E18);
@@ -103,7 +105,7 @@ contract CollateralAuctionThrottlerTest is DSTest {
         assertEq(throttler.perSecondCallerRewardIncrease(), perSecondCallerRewardIncrease);
     }
     function test_modify_parameters() public {
-        liquidationEngine = new LiquidationEngine(address(safeEngine));
+        liquidationEngine = new CustomLiquidationEngine(address(safeEngine));
         treasury          = new MockTreasury(address(systemCoin));
 
         throttler.modifyParameters("treasury", address(treasury));
