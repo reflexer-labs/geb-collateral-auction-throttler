@@ -3,6 +3,7 @@ pragma solidity 0.6.7;
 import "geb-treasury-reimbursement/reimbursement/IncreasingTreasuryReimbursement.sol";
 
 abstract contract LiquidationEngineLike {
+    function currentOnAuctionSystemCoins() virtual public view returns (uint256);
     function modifyParameters(bytes32, uint256) virtual external;
 }
 abstract contract SAFEEngineLike {
@@ -148,12 +149,14 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
           totalSurplus = addition(totalSurplus, safeEngine.coinBalance(surplusHolders[i]));
         }
         // Remove surplus from global debt
-        uint256 rawGlobalDebt   = subtract(safeEngine.globalDebt(), totalSurplus);
-        rawGlobalDebt           = subtract(rawGlobalDebt, safeEngine.globalUnbackedDebt());
+        uint256 rawGlobalDebt               = subtract(safeEngine.globalDebt(), totalSurplus);
+        rawGlobalDebt                       = subtract(rawGlobalDebt, safeEngine.globalUnbackedDebt());
         // Calculate and set the onAuctionSystemCoinLimit
-        uint256 newAuctionLimit = multiply(rawGlobalDebt / HUNDRED, globalDebtPercentage);
-        newAuctionLimit         = (newAuctionLimit <= minAuctionLimit) ? minAuctionLimit : newAuctionLimit;
-        newAuctionLimit         = (newAuctionLimit == 0) ? uint(-1) : newAuctionLimit;
+        uint256 newAuctionLimit             = multiply(rawGlobalDebt / HUNDRED, globalDebtPercentage);
+        uint256 currentOnAuctionSystemCoins = liquidationEngine.currentOnAuctionSystemCoins();
+        newAuctionLimit                     = (newAuctionLimit <= minAuctionLimit) ? minAuctionLimit : newAuctionLimit;
+        newAuctionLimit                     = (newAuctionLimit == 0) ? uint(-1) : newAuctionLimit;
+        newAuctionLimit                     = (newAuctionLimit < currentOnAuctionSystemCoins) ? currentOnAuctionSystemCoins : newAuctionLimit;
         liquidationEngine.modifyParameters("onAuctionSystemCoinLimit", newAuctionLimit);
         // Pay the caller for updating the rate
         rewardCaller(feeReceiver, callerReward);

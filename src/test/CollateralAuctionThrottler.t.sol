@@ -22,13 +22,19 @@ contract CustomSAFEEngine is SAFEEngine {
     }
 }
 
+contract CustomLiquidationEngine is LiquidationEngine {
+    function modifyCurrentOnAuctionSystemCoins(uint256 data) public {
+        currentOnAuctionSystemCoins = data;
+    }
+}
+
 contract CollateralAuctionThrottlerTest is DSTest {
     Hevm hevm;
 
     DSToken systemCoin;
 
     CustomSAFEEngine safeEngine;
-    LiquidationEngine liquidationEngine;
+    CustomLiquidationEngine liquidationEngine;
     MockTreasury treasury;
 
     CollateralAuctionThrottler throttler;
@@ -120,6 +126,13 @@ contract CollateralAuctionThrottlerTest is DSTest {
         assertEq(throttler.baseUpdateCallerReward(), 1);
         assertEq(throttler.maxUpdateCallerReward(), 2);
         assertEq(throttler.perSecondCallerRewardIncrease(), 10 ** 27 + 1);
+    }
+    function test_computed_amount_lower_than_on_auction_system_coins() public {
+        safeEngine.modifyGlobalDebt("globalDebt", 100E45);
+        liquidationEngine.modifyCurrentOnAuctionSystemCoins(75E45);
+
+        throttler.recomputeOnAuctionSystemCoinLimit(charlie);
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), 75E45);
     }
     function test_auto_recompute_zero_global_debt_zero_min() public {
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
