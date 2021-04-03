@@ -22,7 +22,7 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
     uint256 public globalDebtPercentage;            // [hundred]
     // The minimum auction limit
     uint256 public minAuctionLimit;                 // [rad]
-    // Last timestamp when the median was updated
+    // Last timestamp when the onAuctionSystemCoinLimit was updated
     uint256 public lastUpdateTime;                  // [unix timestamp]
 
     LiquidationEngineLike    public liquidationEngine;
