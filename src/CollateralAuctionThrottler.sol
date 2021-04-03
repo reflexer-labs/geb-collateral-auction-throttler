@@ -14,7 +14,7 @@ abstract contract SAFEEngineLike {
 
 contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
     // --- Variables ---
-    // Delay between updates after which the reward starts to increase
+    // Minimum delay between consecutive updates
     uint256 public updateDelay;                     // [seconds]
     // Delay since the last update time after which backupLimitRecompute can be called
     uint256 public backupUpdateDelay;               // [seconds]
