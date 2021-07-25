@@ -3,43 +3,43 @@ pragma solidity 0.6.7;
 import "ds-test/test.sol";
 import "ds-token/token.sol";
 
-import "geb/single/SAFEEngine.sol";
-import "geb/single/LiquidationEngine.sol";
+import "geb/multi/MultiSAFEEngine.sol";
+import "geb/multi/MultiLiquidationEngine.sol";
 import "./mock/MockTreasury.sol";
 
-import {CollateralAuctionThrottler} from "../CollateralAuctionThrottler.sol";
+import {MultiCollateralAuctionThrottler} from "../MultiCollateralAuctionThrottler.sol";
 
 abstract contract Hevm {
     function warp(uint256) virtual public;
 }
 
-contract CustomSAFEEngine is SAFEEngine {
-    function modifyGlobalDebt(bytes32 parameter, uint data) external {
-        globalDebt = data;
+contract CustomMultiSAFEEngine is MultiSAFEEngine {
+    function modifyGlobalDebt(bytes32 coinName, bytes32 parameter, uint data) external {
+        globalDebt[coinName] = data;
     }
-    function modifyUnbackedDebt(bytes32 parameter, uint data) external {
-        globalUnbackedDebt = data;
-    }
-}
-
-contract CustomLiquidationEngine is LiquidationEngine {
-    constructor(address safeEngine) public LiquidationEngine(safeEngine) {}
-
-    function modifyCurrentOnAuctionSystemCoins(uint256 data) public {
-        currentOnAuctionSystemCoins = data;
+    function modifyUnbackedDebt(bytes32 coinName, bytes32 parameter, uint data) external {
+        globalUnbackedDebt[coinName] = data;
     }
 }
 
-contract CollateralAuctionThrottlerTest is DSTest {
+contract CustomMultiLiquidationEngine is MultiLiquidationEngine {
+    constructor(address safeEngine) public MultiLiquidationEngine(safeEngine) {}
+
+    function modifyCurrentOnAuctionSystemCoins(bytes32 coinName, uint256 data) public {
+        currentOnAuctionSystemCoins[coinName] = data;
+    }
+}
+
+contract MultiCollateralAuctionThrottlerTest is DSTest {
     Hevm hevm;
 
     DSToken systemCoin;
 
-    CustomSAFEEngine safeEngine;
-    CustomLiquidationEngine liquidationEngine;
-    MockTreasury treasury;
+    CustomMultiSAFEEngine safeEngine;
+    CustomMultiLiquidationEngine liquidationEngine;
+    MultiMockTreasury treasury;
 
-    CollateralAuctionThrottler throttler;
+    MultiCollateralAuctionThrottler throttler;
 
     // Throttler vars
     uint256 updateDelay                     = 1 hours;
@@ -55,6 +55,8 @@ contract CollateralAuctionThrottlerTest is DSTest {
     address bob     = address(0x2);
     address charlie = address(0x3);
 
+    bytes32 coinName = "BAI";
+
     function setUp() public {
         hevm = Hevm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
         hevm.warp(604411200);
@@ -63,13 +65,17 @@ contract CollateralAuctionThrottlerTest is DSTest {
         surplusHolders.push(bob);
 
         systemCoin        = new DSToken("RAI", "RAI");
-        safeEngine        = new CustomSAFEEngine();
-        liquidationEngine = new CustomLiquidationEngine(address(safeEngine));
-        treasury          = new MockTreasury(address(systemCoin));
+        safeEngine        = new CustomMultiSAFEEngine();
+        liquidationEngine = new CustomMultiLiquidationEngine(address(safeEngine));
+        treasury          = new MultiMockTreasury(address(systemCoin));
+
+        safeEngine.initializeCoin(coinName, uint(-1));
+        liquidationEngine.initializeCoin(coinName, uint(-1));
 
         systemCoin.mint(address(treasury), 1000E18);
 
-        throttler         = new CollateralAuctionThrottler(
+        throttler         = new MultiCollateralAuctionThrottler(
+          coinName,
           address(safeEngine),
           address(liquidationEngine),
           address(treasury),
@@ -83,10 +89,10 @@ contract CollateralAuctionThrottlerTest is DSTest {
         );
         throttler.modifyParameters("maxRewardIncreaseDelay", 6 hours);
 
-        treasury.setPerBlockAllowance(address(throttler), maxUpdateCallerReward * 10 ** 27);
-        treasury.setTotalAllowance(address(throttler), uint(-1));
+        treasury.setPerBlockAllowance(coinName, address(throttler), maxUpdateCallerReward * 10 ** 27);
+        treasury.setTotalAllowance(coinName, address(throttler), uint(-1));
 
-        liquidationEngine.addAuthorization(address(throttler));
+        liquidationEngine.addAuthorization(coinName, address(throttler));
 
         delete(surplusHolders);
     }
@@ -95,6 +101,8 @@ contract CollateralAuctionThrottlerTest is DSTest {
         assertEq(address(throttler.safeEngine()), address(safeEngine));
         assertEq(address(throttler.liquidationEngine()), address(liquidationEngine));
         assertEq(address(throttler.treasury()), address(treasury));
+
+        assertEq(throttler.coinName(), coinName);
         assertEq(throttler.updateDelay(), updateDelay);
         assertEq(throttler.backupUpdateDelay(), backupUpdateDelay);
         assertEq(throttler.globalDebtPercentage(), globalDebtPercentage);
@@ -105,8 +113,10 @@ contract CollateralAuctionThrottlerTest is DSTest {
         assertEq(throttler.perSecondCallerRewardIncrease(), perSecondCallerRewardIncrease);
     }
     function test_modify_parameters() public {
-        liquidationEngine = new CustomLiquidationEngine(address(safeEngine));
-        treasury          = new MockTreasury(address(systemCoin));
+        liquidationEngine = new CustomMultiLiquidationEngine(address(safeEngine));
+        treasury          = new MultiMockTreasury(address(systemCoin));
+
+        liquidationEngine.initializeCoin(coinName, uint(-1));
 
         throttler.modifyParameters("treasury", address(treasury));
         throttler.modifyParameters("liquidationEngine", address(liquidationEngine));
@@ -120,6 +130,7 @@ contract CollateralAuctionThrottlerTest is DSTest {
 
         assertEq(address(throttler.liquidationEngine()), address(liquidationEngine));
         assertEq(address(throttler.treasury()), address(treasury));
+
         assertEq(throttler.updateDelay(), 30 minutes);
         assertEq(throttler.backupUpdateDelay(), 50 minutes);
         assertEq(throttler.globalDebtPercentage(), 90);
@@ -130,38 +141,38 @@ contract CollateralAuctionThrottlerTest is DSTest {
         assertEq(throttler.perSecondCallerRewardIncrease(), 10 ** 27 + 1);
     }
     function test_computed_amount_lower_than_on_auction_system_coins() public {
-        safeEngine.modifyGlobalDebt("globalDebt", 100E45);
-        liquidationEngine.modifyCurrentOnAuctionSystemCoins(75E45);
+        safeEngine.modifyGlobalDebt(coinName, "globalDebt", 100E45);
+        liquidationEngine.modifyCurrentOnAuctionSystemCoins(coinName, 75E45);
 
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
-        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), 75E45);
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(coinName), 75E45);
     }
     function test_auto_recompute_zero_global_debt_zero_min() public {
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
         assertEq(systemCoin.balanceOf(charlie), baseUpdateCallerReward);
-        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), uint(-1));
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(coinName), uint(-1));
         assertEq(systemCoin.balanceOf(charlie), baseUpdateCallerReward);
     }
     function test_auto_recompute_zero_global_debt_positive_min() public {
         throttler.modifyParameters("minAuctionLimit", 5E75);
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
-        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), 5E75);
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(coinName), 5E75);
         assertEq(systemCoin.balanceOf(charlie), baseUpdateCallerReward);
     }
     function test_auto_recompute_twice_positive_global_debt() public {
-        safeEngine.modifyGlobalDebt("globalDebt", 1E45);
+        safeEngine.modifyGlobalDebt(coinName, "globalDebt", 1E45);
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
         assertEq(systemCoin.balanceOf(charlie), baseUpdateCallerReward);
-        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), 0.2E45);
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(coinName), 0.2E45);
 
         hevm.warp(now + updateDelay);
 
         assertEq(throttler.treasuryAllowance(), maxUpdateCallerReward * 10 ** 27);
         assertEq(throttler.getCallerReward(throttler.lastUpdateTime(), updateDelay), baseUpdateCallerReward);
-        safeEngine.modifyGlobalDebt("globalDebt", 5E75);
+        safeEngine.modifyGlobalDebt(coinName, "globalDebt", 5E75);
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
         assertEq(systemCoin.balanceOf(charlie), baseUpdateCallerReward * 2);
-        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), 1E75);
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(coinName), 1E75);
     }
     function testFail_auto_recompute_twice_same_block() public {
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
@@ -173,38 +184,38 @@ contract CollateralAuctionThrottlerTest is DSTest {
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
     }
     function test_auto_recompute_both_addresses_have_surplus_positive_unbacked_debt() public {
-        safeEngine.createUnbackedDebt(address(this), address(alice), 1e45);
-        safeEngine.createUnbackedDebt(address(this), address(bob), 1e45);
+        safeEngine.createUnbackedDebt(coinName, address(this), address(alice), 1e45);
+        safeEngine.createUnbackedDebt(coinName, address(this), address(bob), 1e45);
 
-        safeEngine.modifyGlobalDebt("globalDebt", 5E45);
+        safeEngine.modifyGlobalDebt(coinName, "globalDebt", 5E45);
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
         assertEq(systemCoin.balanceOf(charlie), baseUpdateCallerReward);
-        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), 0.2E45);
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(coinName), 0.2E45);
     }
     function test_auto_recompute_non_null_unbacked_debt() public {
-        safeEngine.modifyGlobalDebt("globalDebt", 5E45);
-        safeEngine.modifyUnbackedDebt("globalUnbackedDebt", 2E45);
+        safeEngine.modifyGlobalDebt(coinName, "globalDebt", 5E45);
+        safeEngine.modifyUnbackedDebt(coinName, "globalUnbackedDebt", 2E45);
 
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
         assertEq(systemCoin.balanceOf(charlie), baseUpdateCallerReward);
-        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), 0.6E45);
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(coinName), 0.6E45);
     }
     function test_auto_recompute_global_debt_max_uint() public {
-        safeEngine.modifyGlobalDebt("globalDebt", uint(-1));
+        safeEngine.modifyGlobalDebt(coinName, "globalDebt", uint(-1));
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
         assertEq(systemCoin.balanceOf(charlie), baseUpdateCallerReward);
-        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), uint(-1) / 100 * globalDebtPercentage);
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(coinName), uint(-1) / 100 * globalDebtPercentage);
     }
     function test_late_auto_recompute() public {
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
         hevm.warp(now + backupUpdateDelay);
 
-        safeEngine.modifyGlobalDebt("globalDebt", 1E45);
+        safeEngine.modifyGlobalDebt(coinName, "globalDebt", 1E45);
         throttler.backupRecomputeOnAuctionSystemCoinLimit();
-        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), uint(-1));
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(coinName), uint(-1));
     }
     function testFail_late_auto_recompute_twice_same_block() public {
-        safeEngine.modifyGlobalDebt("globalDebt", 1E45);
+        safeEngine.modifyGlobalDebt(coinName, "globalDebt", 1E45);
         throttler.backupRecomputeOnAuctionSystemCoinLimit();
         throttler.backupRecomputeOnAuctionSystemCoinLimit();
     }
@@ -212,15 +223,15 @@ contract CollateralAuctionThrottlerTest is DSTest {
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
         hevm.warp(now + backupUpdateDelay);
 
-        safeEngine.modifyGlobalDebt("globalDebt", uint(-1));
+        safeEngine.modifyGlobalDebt(coinName, "globalDebt", uint(-1));
         throttler.backupRecomputeOnAuctionSystemCoinLimit();
-        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), uint(-1));
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(coinName), uint(-1));
     }
     function testFail_late_auto_recompute_before_late_delay() public {
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
         hevm.warp(now + backupUpdateDelay);
 
-        safeEngine.modifyGlobalDebt("globalDebt", uint(-1));
+        safeEngine.modifyGlobalDebt(coinName, "globalDebt", uint(-1));
         throttler.backupRecomputeOnAuctionSystemCoinLimit();
         assertEq(throttler.lastUpdateTime(), now);
 
@@ -231,12 +242,12 @@ contract CollateralAuctionThrottlerTest is DSTest {
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
         hevm.warp(now + backupUpdateDelay);
 
-        safeEngine.modifyGlobalDebt("globalDebt", uint(-1));
+        safeEngine.modifyGlobalDebt(coinName, "globalDebt", uint(-1));
         throttler.backupRecomputeOnAuctionSystemCoinLimit();
 
         hevm.warp(now + updateDelay);
-        safeEngine.modifyGlobalDebt("globalDebt", 1E45);
+        safeEngine.modifyGlobalDebt(coinName, "globalDebt", 1E45);
         throttler.recomputeOnAuctionSystemCoinLimit(charlie);
-        assertEq(liquidationEngine.onAuctionSystemCoinLimit(), 0.2E45);
+        assertEq(liquidationEngine.onAuctionSystemCoinLimit(coinName), 0.2E45);
     }
 }

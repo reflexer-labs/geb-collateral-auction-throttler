@@ -1,18 +1,18 @@
 pragma solidity 0.6.7;
 
-import "geb-treasury-reimbursement/reimbursement/single/IncreasingTreasuryReimbursement.sol";
+import "geb-treasury-reimbursement/reimbursement/multi/MultiIncreasingTreasuryReimbursement.sol";
 
 abstract contract LiquidationEngineLike {
-    function currentOnAuctionSystemCoins() virtual public view returns (uint256);
-    function modifyParameters(bytes32, uint256) virtual external;
+    function currentOnAuctionSystemCoins(bytes32) virtual public view returns (uint256);
+    function modifyParameters(bytes32, bytes32, uint256) virtual external;
 }
 abstract contract SAFEEngineLike {
-    function globalDebt() virtual public view returns (uint256);
-    function globalUnbackedDebt() virtual public view returns (uint256);
-    function coinBalance(address) virtual public view returns (uint256);
+    function globalDebt(bytes32) virtual public view returns (uint256);
+    function globalUnbackedDebt(bytes32) virtual public view returns (uint256);
+    function coinBalance(bytes32, address) virtual public view returns (uint256);
 }
 
-contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
+contract MultiCollateralAuctionThrottler is MultiIncreasingTreasuryReimbursement {
     // --- Variables ---
     // Minimum delay between consecutive updates
     uint256 public updateDelay;                     // [seconds]
@@ -32,6 +32,7 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
     address[]                public surplusHolders;
 
     constructor(
+      bytes32 coinName_,
       address safeEngine_,
       address liquidationEngine_,
       address treasury_,
@@ -42,13 +43,13 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
       uint256 perSecondCallerRewardIncrease_,
       uint256 globalDebtPercentage_,
       address[] memory surplusHolders_
-    ) public IncreasingTreasuryReimbursement(treasury_, baseUpdateCallerReward_, maxUpdateCallerReward_, perSecondCallerRewardIncrease_) {
-        require(safeEngine_ != address(0), "CollateralAuctionThrottler/null-safe-engine");
-        require(liquidationEngine_ != address(0), "CollateralAuctionThrottler/null-liquidation-engine");
-        require(updateDelay_ > 0, "CollateralAuctionThrottler/null-update-delay");
-        require(backupUpdateDelay_ > updateDelay_, "CollateralAuctionThrottler/invalid-backup-update-delay");
-        require(both(globalDebtPercentage_ > 0, globalDebtPercentage_ <= HUNDRED), "CollateralAuctionThrottler/invalid-global-debt-percentage");
-        require(surplusHolders_.length <= HOLDERS_ARRAY_LIMIT, "CollateralAuctionThrottler/invalid-holder-array-length");
+    ) public MultiIncreasingTreasuryReimbursement(coinName_, treasury_, baseUpdateCallerReward_, maxUpdateCallerReward_, perSecondCallerRewardIncrease_) {
+        require(safeEngine_ != address(0), "MultiCollateralAuctionThrottler/null-safe-engine");
+        require(liquidationEngine_ != address(0), "MultiCollateralAuctionThrottler/null-liquidation-engine");
+        require(updateDelay_ > 0, "MultiCollateralAuctionThrottler/null-update-delay");
+        require(backupUpdateDelay_ > updateDelay_, "MultiCollateralAuctionThrottler/invalid-backup-update-delay");
+        require(both(globalDebtPercentage_ > 0, globalDebtPercentage_ <= HUNDRED), "MultiCollateralAuctionThrottler/invalid-global-debt-percentage");
+        require(surplusHolders_.length <= HOLDERS_ARRAY_LIMIT, "MultiCollateralAuctionThrottler/invalid-holder-array-length");
 
         safeEngine             = SAFEEngineLike(safeEngine_);
         liquidationEngine      = LiquidationEngineLike(liquidationEngine_);
@@ -80,37 +81,37 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
     */
     function modifyParameters(bytes32 parameter, uint256 data) external isAuthorized {
         if (parameter == "baseUpdateCallerReward") {
-          require(data <= maxUpdateCallerReward, "CollateralAuctionThrottler/invalid-min-reward");
+          require(data <= maxUpdateCallerReward, "MultiCollateralAuctionThrottler/invalid-min-reward");
           baseUpdateCallerReward = data;
         }
         else if (parameter == "maxUpdateCallerReward") {
-          require(data >= baseUpdateCallerReward, "CollateralAuctionThrottler/invalid-max-reward");
+          require(data >= baseUpdateCallerReward, "MultiCollateralAuctionThrottler/invalid-max-reward");
           maxUpdateCallerReward = data;
         }
         else if (parameter == "perSecondCallerRewardIncrease") {
-          require(data >= RAY, "CollateralAuctionThrottler/invalid-reward-increase");
+          require(data >= RAY, "MultiCollateralAuctionThrottler/invalid-reward-increase");
           perSecondCallerRewardIncrease = data;
         }
         else if (parameter == "maxRewardIncreaseDelay") {
-          require(data > 0, "CollateralAuctionThrottler/invalid-max-increase-delay");
+          require(data > 0, "MultiCollateralAuctionThrottler/invalid-max-increase-delay");
           maxRewardIncreaseDelay = data;
         }
         else if (parameter == "updateDelay") {
-          require(data > 0, "CollateralAuctionThrottler/null-update-delay");
+          require(data > 0, "MultiCollateralAuctionThrottler/null-update-delay");
           updateDelay = data;
         }
         else if (parameter == "backupUpdateDelay") {
-          require(data > updateDelay, "CollateralAuctionThrottler/invalid-backup-update-delay");
+          require(data > updateDelay, "MultiCollateralAuctionThrottler/invalid-backup-update-delay");
           backupUpdateDelay = data;
         }
         else if (parameter == "globalDebtPercentage") {
-          require(both(data > 0, data <= HUNDRED), "CollateralAuctionThrottler/invalid-global-debt-percentage");
+          require(both(data > 0, data <= HUNDRED), "MultiCollateralAuctionThrottler/invalid-global-debt-percentage");
           globalDebtPercentage = data;
         }
         else if (parameter == "minAuctionLimit") {
           minAuctionLimit = data;
         }
-        else revert("CollateralAuctionThrottler/modify-unrecognized-param");
+        else revert("MultiCollateralAuctionThrottler/modify-unrecognized-param");
         emit ModifyParameters(parameter, data);
     }
     /*
@@ -119,15 +120,15 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
     * @param addr The new address
     */
     function modifyParameters(bytes32 parameter, address addr) external isAuthorized {
-        require(addr != address(0), "CollateralAuctionThrottler/null-addr");
+        require(addr != address(0), "MultiCollateralAuctionThrottler/null-addr");
         if (parameter == "treasury") {
-          require(StabilityFeeTreasuryLike(addr).systemCoin() != address(0), "CollateralAuctionThrottler/treasury-coin-not-set");
+          require(StabilityFeeTreasuryLike(addr).systemCoin(coinName) != address(0), "MultiCollateralAuctionThrottler/treasury-coin-not-set");
       	  treasury = StabilityFeeTreasuryLike(addr);
         }
         else if (parameter == "liquidationEngine") {
           liquidationEngine = LiquidationEngineLike(addr);
         }
-        else revert("CollateralAuctionThrottler/modify-unrecognized-param");
+        else revert("MultiCollateralAuctionThrottler/modify-unrecognized-param");
         emit ModifyParameters(parameter, addr);
     }
 
@@ -138,7 +139,7 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
     */
     function recomputeOnAuctionSystemCoinLimit(address feeReceiver) public {
         // Check delay between calls
-        require(either(subtract(now, lastUpdateTime) >= updateDelay, lastUpdateTime == 0), "CollateralAuctionThrottler/wait-more");
+        require(either(subtract(now, lastUpdateTime) >= updateDelay, lastUpdateTime == 0), "MultiCollateralAuctionThrottler/wait-more");
         // Get the caller's reward
         uint256 callerReward = getCallerReward(lastUpdateTime, updateDelay);
         // Store the timestamp of the update
@@ -146,18 +147,18 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
         // Compute total surplus
         uint256 totalSurplus;
         for (uint i = 0; i < surplusHolders.length; i++) {
-          totalSurplus = addition(totalSurplus, safeEngine.coinBalance(surplusHolders[i]));
+          totalSurplus = addition(totalSurplus, safeEngine.coinBalance(coinName, surplusHolders[i]));
         }
         // Remove surplus from global debt
-        uint256 rawGlobalDebt               = subtract(safeEngine.globalDebt(), totalSurplus);
-        rawGlobalDebt                       = subtract(rawGlobalDebt, safeEngine.globalUnbackedDebt());
+        uint256 rawGlobalDebt               = subtract(safeEngine.globalDebt(coinName), totalSurplus);
+        rawGlobalDebt                       = subtract(rawGlobalDebt, safeEngine.globalUnbackedDebt(coinName));
         // Calculate and set the onAuctionSystemCoinLimit
         uint256 newAuctionLimit             = multiply(rawGlobalDebt / HUNDRED, globalDebtPercentage);
-        uint256 currentOnAuctionSystemCoins = liquidationEngine.currentOnAuctionSystemCoins();
+        uint256 currentOnAuctionSystemCoins = liquidationEngine.currentOnAuctionSystemCoins(coinName);
         newAuctionLimit                     = (newAuctionLimit <= minAuctionLimit) ? minAuctionLimit : newAuctionLimit;
         newAuctionLimit                     = (newAuctionLimit == 0) ? uint(-1) : newAuctionLimit;
         newAuctionLimit                     = (newAuctionLimit < currentOnAuctionSystemCoins) ? currentOnAuctionSystemCoins : newAuctionLimit;
-        liquidationEngine.modifyParameters("onAuctionSystemCoinLimit", newAuctionLimit);
+        liquidationEngine.modifyParameters(coinName, "onAuctionSystemCoinLimit", newAuctionLimit);
         // Pay the caller for updating the rate
         rewardCaller(feeReceiver, callerReward);
     }
@@ -166,10 +167,10 @@ contract CollateralAuctionThrottler is IncreasingTreasuryReimbursement {
     */
     function backupRecomputeOnAuctionSystemCoinLimit() public {
         // Check delay between calls
-        require(both(subtract(now, lastUpdateTime) >= backupUpdateDelay, lastUpdateTime > 0), "CollateralAuctionThrottler/wait-more");
+        require(both(subtract(now, lastUpdateTime) >= backupUpdateDelay, lastUpdateTime > 0), "MultiCollateralAuctionThrottler/wait-more");
         // Store the timestamp of the update
         lastUpdateTime = now;
         // Set the onAuctionSystemCoinLimit
-        liquidationEngine.modifyParameters("onAuctionSystemCoinLimit", uint(-1));
+        liquidationEngine.modifyParameters(coinName, "onAuctionSystemCoinLimit", uint(-1));
     }
 }
